@@ -22,6 +22,7 @@ export interface SearchOptions {
   hasAvailableChapters?: boolean;
   hasUnavailableChapters?: boolean;
   order?: Record<string, "asc" | "desc">;
+  includes?: string[];
 }
 
 export class Search {
@@ -48,6 +49,7 @@ export class Search {
       hasAvailableChapters,
       hasUnavailableChapters,
       order,
+      includes,
     } = options;
 
     const urlParams = new URLSearchParams();
@@ -81,6 +83,7 @@ export class Search {
         urlParams.append(`order[${key}]`, value);
       }
     }
+    if (includes) includes.forEach((inc) => urlParams.append("includes[]", inc));
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);
