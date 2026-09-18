@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -19,6 +19,15 @@ const FALLBACK_ASPECT_RATIO = 0.7;
  * large, so the strip is capped and centered instead of stretching edge
  * to edge. */
 const MAX_PAGE_WIDTH = 720;
+
+/**
+ * FlatList throws ("Changing onViewableItemsChanged on the fly is not
+ * supported") if the function identity passed as onViewableItemsChanged
+ * ever changes after mount - and the same applies in practice to
+ * viewabilityConfig. Both must be created exactly once per FlatList
+ * instance, so viewabilityConfig lives outside the component entirely.
+ */
+const VIEWABILITY_CONFIG = { itemVisiblePercentThreshold: 60 } as const;
 
 function PageImage({ uri, width }: { uri: string; width: number }) {
   const [aspectRatio, setAspectRatio] = useState(FALLBACK_ASPECT_RATIO);
@@ -74,20 +83,34 @@ export function ScrollReader({ pageUrls, onPageChange, onReachEnd }: ReadingMode
   const pageWidth = Math.min(windowWidth, MAX_PAGE_WIDTH);
   const lastReportedIndex = useRef<number>(-1);
 
-  const onViewableItemsChanged = useCallback(
+  // onPageChange/onReachEnd are freshly-created closures on every render of
+  // the parent (ReaderScreen passes `onReachEnd={() => {...}}` inline), and
+  // pageUrls swaps to a new array each time a chapter loads. None of that
+  // can flow into onViewableItemsChanged directly - a ref holds the latest
+  // values instead, so the function handed to FlatList never changes.
+  const latest = useRef({ onPageChange, onReachEnd, totalPages: pageUrls.length });
+  useEffect(() => {
+    latest.current = { onPageChange, onReachEnd, totalPages: pageUrls.length };
+  });
+
+  // Reset the "current page" tracking whenever a new chapter's pages come in.
+  useEffect(() => {
+    lastReportedIndex.current = -1;
+  }, [pageUrls]);
+
+  const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ListViewToken[] }) => {
       if (viewableItems.length === 0) return;
       const topMost = viewableItems[0].index ?? 0;
       if (topMost !== lastReportedIndex.current) {
         lastReportedIndex.current = topMost;
-        onPageChange?.(topMost);
-        if (topMost === pageUrls.length - 1) {
-          onReachEnd?.();
+        latest.current.onPageChange?.(topMost);
+        if (topMost === latest.current.totalPages - 1) {
+          latest.current.onReachEnd?.();
         }
       }
-    },
-    [onPageChange, onReachEnd, pageUrls.length]
-  );
+    }
+  ).current;
 
   return (
     <FlatList
@@ -100,7 +123,7 @@ export function ScrollReader({ pageUrls, onPageChange, onReachEnd }: ReadingMode
       windowSize={5}
       removeClippedSubviews
       onViewableItemsChanged={onViewableItemsChanged}
-      viewabilityConfig={{ itemVisiblePercentThreshold: 60 }}
+      viewabilityConfig={VIEWABILITY_CONFIG}
       style={styles.list}
       contentContainerStyle={styles.listContent}
     />
